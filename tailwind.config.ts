@@ -46,6 +46,7 @@ export default {
         'fade-in':    'fadeIn 0.15s ease-out',
         'slide-down': 'slideDown 0.18s ease-out',
         'scale-in':   'scaleIn 0.12s ease-out',
+        'slide-right': 'slideRight 0.2s ease-out',
       },
       keyframes: {
         fadeIn: {
@@ -59,6 +60,10 @@ export default {
         scaleIn: {
           from: { opacity: '0', transform: 'scale(0.96)' },
           to:   { opacity: '1', transform: 'scale(1)' },
+        },
+        slideRight: {
+          from: { opacity: '0', transform: 'translateX(16px)' },
+          to:   { opacity: '1', transform: 'translateX(0)' },
         },
       },
       boxShadow: {

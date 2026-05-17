@@ -4,6 +4,7 @@ import { CSS } from '@dnd-kit/utilities'
 import { Trash2, AlignLeft, ChevronUp } from 'lucide-react'
 import { Task } from '../../types'
 import { useBoardStore } from '../../store/boardStore'
+import { useUIStore } from '../../store/uiStore'
 import { EditableText } from '../../components/EditableText'
 import { IconButton } from '../../components/IconButton'
 import { cn } from '../../utils/cn'
@@ -15,6 +16,7 @@ interface TaskCardProps {
 
 export function TaskCard({ task, columnId }: TaskCardProps) {
   const { updateTask, deleteTask } = useBoardStore()
+  const setSelectedTaskId = useUIStore((s) => s.setSelectedTaskId)
   const [expanded, setExpanded] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
@@ -71,6 +73,7 @@ export function TaskCard({ task, columnId }: TaskCardProps) {
         'transition-all duration-150 cursor-grab active:cursor-grabbing',
         'animate-fade-in'
       )}
+      onClick={() => setSelectedTaskId(task.id)}
       {...attributes}
       {...listeners}
     >
@@ -82,6 +85,7 @@ export function TaskCard({ task, columnId }: TaskCardProps) {
             'opacity-0 group-hover:opacity-100 transition-opacity duration-100'
           )}
           onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
         >
           <IconButton
             onClick={(e) => {
@@ -104,7 +108,7 @@ export function TaskCard({ task, columnId }: TaskCardProps) {
         </div>
 
         {/* Title */}
-        <div onPointerDown={(e) => e.stopPropagation()}>
+        <div onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
           <EditableText
             value={task.title}
             onSave={(title) => updateTask(task.id, { title })}
@@ -122,6 +126,7 @@ export function TaskCard({ task, columnId }: TaskCardProps) {
           <div
             className="mt-2 animate-fade-in"
             onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
           >
             <EditableText
               value={task.description ?? ''}

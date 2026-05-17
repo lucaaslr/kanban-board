@@ -1,12 +1,15 @@
 import React from 'react'
 import { Moon, Sun, LayoutDashboard } from 'lucide-react'
 import { Board } from './features/board/Board'
+import { TaskPanel } from './features/board/TaskPanel'
 import { ProfileSwitcher } from './features/profiles/ProfileSwitcher'
 import { useTheme } from './hooks/useTheme'
+import { useUIStore } from './store/uiStore'
 import { cn } from './utils/cn'
 
 export function App() {
   const { darkMode, toggleDarkMode } = useTheme()
+  const selectedTaskId = useUIStore((s) => s.selectedTaskId)
 
   return (
     <div className="flex flex-col h-full bg-surface-50 dark:bg-surface-950 transition-colors duration-300">
@@ -66,8 +69,11 @@ export function App() {
       </header>
 
       {/* ── Board ───────────────────────────────────────────────────────── */}
-      <main className="flex-1 overflow-hidden">
+      <main className="flex-1 overflow-hidden relative">
         <Board />
+        {selectedTaskId && (
+          <TaskPanel key={selectedTaskId} taskId={selectedTaskId} />
+        )}
       </main>
     </div>
   )

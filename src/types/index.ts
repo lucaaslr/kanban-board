@@ -9,6 +9,7 @@ export type Task = {
   id: string
   title: string
   description?: string
+  notes?: string
   createdAt: number
 }
 

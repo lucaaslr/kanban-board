@@ -5,6 +5,8 @@ interface UIState {
   darkMode: boolean
   toggleDarkMode: () => void
   setDarkMode: (value: boolean) => void
+  selectedTaskId: string | null
+  setSelectedTaskId: (id: string | null) => void
 }
 
 export const useUIStore = create<UIState>()(
@@ -14,6 +16,8 @@ export const useUIStore = create<UIState>()(
 
       toggleDarkMode: () => set((state) => ({ darkMode: !state.darkMode })),
       setDarkMode: (value) => set({ darkMode: value }),
+      selectedTaskId: null,
+      setSelectedTaskId: (id) => set({ selectedTaskId: id }),
     }),
     {
       name: 'kanban-ui-prefs-v1',
