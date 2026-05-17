@@ -1,13 +1,23 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
 import { arrayMove } from '@dnd-kit/sortable'
 import { generateId } from '../utils/id'
-import { createSeedState } from '../utils/seed'
-import type { BoardState, Task } from '../types'
+import { scheduleBoardSync, flushBoardSync, syncSettings } from '../api/sync'
+import { api } from '../api/client'
+import { useProfileStore } from './profileStore'
+import type { BoardState, Task, Column } from '../types'
+
+// ─── Helpers ───────────────────────────────────────────────────────────────
+
+function activeProfileId() {
+  return useProfileStore.getState().activeProfileId
+}
 
 // ─── Action Definitions ────────────────────────────────────────────────────
 
 interface BoardActions {
+  // Hydration
+  setBoard: (state: BoardState) => void
+
   // Column actions
   addColumn: (title: string) => void
   renameColumn: (columnId: string, title: string) => void
@@ -18,225 +28,166 @@ interface BoardActions {
 
   // Task actions
   addTask: (columnId: string, title: string, description?: string) => void
-  updateTask: (taskId: string, changes: Partial<Pick<Task, 'title' | 'description'>>) => void
+  updateTask: (taskId: string, changes: Partial<Pick<Task, 'title' | 'description' | 'notes'>>) => void
   deleteTask: (taskId: string, columnId: string) => void
-  moveTask: (
-    taskId: string,
-    fromColumnId: string,
-    toColumnId: string,
-    toIndex: number
-  ) => void
+  moveTask: (taskId: string, fromColumnId: string, toColumnId: string, toIndex: number) => void
   reorderTasksInColumn: (columnId: string, newTaskIds: string[]) => void
 
-  // Profile board actions
-  switchToProfile: (newProfileId: string, oldProfileId: string) => void
-  deleteProfileBoard: (profileId: string) => void
+  // Profile switching
+  switchToProfile: (newProfileId: string) => Promise<void>
 }
 
-// ─── Store Type ────────────────────────────────────────────────────────────
+type Store = BoardState & BoardActions
 
-type Store = BoardState & BoardActions & {
-  savedBoards: Record<string, BoardState>
+// ─── Sync helper ───────────────────────────────────────────────────────────
+
+function scheduleSync(getState: () => BoardState) {
+  scheduleBoardSync(activeProfileId(), getState)
 }
 
-// ─── Migration helper ──────────────────────────────────────────────────────
+// ─── Store ─────────────────────────────────────────────────────────────────
 
-function getInitialBoardState(): BoardState {
-  try {
-    const raw = localStorage.getItem('kanban-board-v1')
-    if (raw) {
-      const parsed = JSON.parse(raw)
-      const s = parsed?.state
-      if (s?.columns && s?.tasks && s?.columnOrder) return s
-    }
-  } catch { /* ignore */ }
-  return createSeedState()
-}
+export const useBoardStore = create<Store>()((set, get) => ({
+  columns: {},
+  tasks: {},
+  columnOrder: [],
 
-// ─── Store Implementation ──────────────────────────────────────────────────
+  setBoard: (state) => set({ columns: state.columns, tasks: state.tasks, columnOrder: state.columnOrder }),
 
-export const useBoardStore = create<Store>()(
-  persist(
-    (set) => ({
-      // Initial state (overridden by persisted state if available)
-      ...getInitialBoardState(),
-      savedBoards: {},
+  // ── Column Actions ────────────────────────────────────────────────────
 
-      // ── Column Actions ──────────────────────────────────────────────────
+  addColumn: (title) => {
+    const id = generateId()
+    set((s) => ({
+      columns: { ...s.columns, [id]: { id, title, taskIds: [] } },
+      columnOrder: [...s.columnOrder, id],
+    }))
+    scheduleSync(get)
+  },
 
-      addColumn: (title) => {
-        const id = generateId()
-        set((state) => ({
-          columns: {
-            ...state.columns,
-            [id]: { id, title, taskIds: [] },
-          },
-          columnOrder: [...state.columnOrder, id],
-        }))
+  renameColumn: (columnId, title) => {
+    set((s) => ({ columns: { ...s.columns, [columnId]: { ...s.columns[columnId], title } } }))
+    scheduleSync(get)
+  },
+
+  updateColumnTitle: (columnId, title) => {
+    set((s) => ({ columns: { ...s.columns, [columnId]: { ...s.columns[columnId], title } } }))
+    scheduleSync(get)
+  },
+
+  deleteColumn: (columnId) => {
+    set((s) => {
+      const col = s.columns[columnId]
+      if (!col) return s
+      const taskIdSet = new Set(col.taskIds)
+      return {
+        tasks: Object.fromEntries(
+          Object.entries(s.tasks).filter(([id]) => !taskIdSet.has(id))
+        ) as Record<string, Task>,
+        columns: Object.fromEntries(
+          Object.entries(s.columns).filter(([id]) => id !== columnId)
+        ) as Record<string, Column>,
+        columnOrder: s.columnOrder.filter((id) => id !== columnId),
+      }
+    })
+    scheduleSync(get)
+  },
+
+  moveColumn: (fromIndex, toIndex) => {
+    set((s) => ({ columnOrder: arrayMove(s.columnOrder, fromIndex, toIndex) }))
+    scheduleSync(get)
+  },
+
+  reorderColumns: (newOrder) => {
+    set(() => ({ columnOrder: newOrder }))
+    scheduleSync(get)
+  },
+
+  // ── Task Actions ──────────────────────────────────────────────────────
+
+  addTask: (columnId, title, description) => {
+    const id = generateId()
+    const task: Task = { id, title, description, createdAt: Date.now() }
+    set((s) => ({
+      tasks: { ...s.tasks, [id]: task },
+      columns: {
+        ...s.columns,
+        [columnId]: { ...s.columns[columnId], taskIds: [...s.columns[columnId].taskIds, id] },
       },
+    }))
+    scheduleSync(get)
+  },
 
-      renameColumn: (columnId, title) =>
-        set((state) => ({
-          columns: {
-            ...state.columns,
-            [columnId]: { ...state.columns[columnId], title },
-          },
-        })),
+  updateTask: (taskId, changes) => {
+    set((s) => ({ tasks: { ...s.tasks, [taskId]: { ...s.tasks[taskId], ...changes } } }))
+    scheduleSync(get)
+  },
 
-      // Alias for renameColumn (used by BoardColumn component)
-      updateColumnTitle: (columnId, title) =>
-        set((state) => ({
-          columns: {
-            ...state.columns,
-            [columnId]: { ...state.columns[columnId], title },
-          },
-        })),
-
-      deleteColumn: (columnId) =>
-        set((state) => {
-          const column = state.columns[columnId]
-          if (!column) return state
-
-          // Remove all tasks belonging to this column
-          const taskIdSet = new Set(column.taskIds)
-          const newTasks = Object.fromEntries(
-            Object.entries(state.tasks).filter(([id]) => !taskIdSet.has(id))
-          ) as Record<string, Task>
-
-          // Remove column from record
-          const newColumns = Object.fromEntries(
-            Object.entries(state.columns).filter(([id]) => id !== columnId)
-          ) as typeof state.columns
-
-          return {
-            columns: newColumns,
-            tasks: newTasks,
-            columnOrder: state.columnOrder.filter((id) => id !== columnId),
-          }
-        }),
-
-      moveColumn: (fromIndex, toIndex) =>
-        set((state) => ({
-          columnOrder: arrayMove(state.columnOrder, fromIndex, toIndex),
-        })),
-
-      reorderColumns: (newOrder) =>
-        set(() => ({ columnOrder: newOrder })),
-
-      // ── Task Actions ────────────────────────────────────────────────────
-
-      addTask: (columnId, title, description) => {
-        const id = generateId()
-        const task: Task = { id, title, description, createdAt: Date.now() }
-        set((state) => ({
-          tasks: { ...state.tasks, [id]: task },
-          columns: {
-            ...state.columns,
-            [columnId]: {
-              ...state.columns[columnId],
-              taskIds: [...state.columns[columnId].taskIds, id],
-            },
-          },
-        }))
+  deleteTask: (taskId, columnId) => {
+    set((s) => ({
+      tasks: Object.fromEntries(
+        Object.entries(s.tasks).filter(([id]) => id !== taskId)
+      ) as Record<string, Task>,
+      columns: {
+        ...s.columns,
+        [columnId]: {
+          ...s.columns[columnId],
+          taskIds: s.columns[columnId].taskIds.filter((id) => id !== taskId),
+        },
       },
+    }))
+    scheduleSync(get)
+  },
 
-      updateTask: (taskId, changes) =>
-        set((state) => ({
-          tasks: {
-            ...state.tasks,
-            [taskId]: { ...state.tasks[taskId], ...changes },
-          },
-        })),
-
-      deleteTask: (taskId, columnId) =>
-        set((state) => {
-          const newTasks = Object.fromEntries(
-            Object.entries(state.tasks).filter(([id]) => id !== taskId)
-          ) as Record<string, Task>
-
-          return {
-            tasks: newTasks,
-            columns: {
-              ...state.columns,
-              [columnId]: {
-                ...state.columns[columnId],
-                taskIds: state.columns[columnId].taskIds.filter((id) => id !== taskId),
-              },
-            },
-          }
-        }),
-
-      moveTask: (taskId, fromColumnId, toColumnId, toIndex) =>
-        set((state) => {
-          // Same-column reorder
-          if (fromColumnId === toColumnId) {
-            const taskIds = state.columns[fromColumnId].taskIds
-            const fromIndex = taskIds.indexOf(taskId)
-            if (fromIndex === -1) return state
-            return {
-              columns: {
-                ...state.columns,
-                [fromColumnId]: {
-                  ...state.columns[fromColumnId],
-                  taskIds: arrayMove(taskIds, fromIndex, toIndex),
-                },
-              },
-            }
-          }
-
-          // Cross-column move
-          const fromTaskIds = state.columns[fromColumnId].taskIds.filter(
-            (id) => id !== taskId
-          )
-          const toTaskIds = [...state.columns[toColumnId].taskIds]
-          toTaskIds.splice(toIndex, 0, taskId)
-
-          return {
-            columns: {
-              ...state.columns,
-              [fromColumnId]: { ...state.columns[fromColumnId], taskIds: fromTaskIds },
-              [toColumnId]:   { ...state.columns[toColumnId],   taskIds: toTaskIds   },
-            },
-          }
-        }),
-
-      reorderTasksInColumn: (columnId, newTaskIds) =>
-        set((state) => ({
+  moveTask: (taskId, fromColumnId, toColumnId, toIndex) => {
+    set((s) => {
+      if (fromColumnId === toColumnId) {
+        const taskIds = s.columns[fromColumnId].taskIds
+        const fromIndex = taskIds.indexOf(taskId)
+        if (fromIndex === -1) return s
+        return {
           columns: {
-            ...state.columns,
-            [columnId]: { ...state.columns[columnId], taskIds: newTaskIds },
+            ...s.columns,
+            [fromColumnId]: { ...s.columns[fromColumnId], taskIds: arrayMove(taskIds, fromIndex, toIndex) },
           },
-        })),
+        }
+      }
+      const fromTaskIds = s.columns[fromColumnId].taskIds.filter((id) => id !== taskId)
+      const toTaskIds = [...s.columns[toColumnId].taskIds]
+      toTaskIds.splice(toIndex, 0, taskId)
+      return {
+        columns: {
+          ...s.columns,
+          [fromColumnId]: { ...s.columns[fromColumnId], taskIds: fromTaskIds },
+          [toColumnId]:   { ...s.columns[toColumnId],   taskIds: toTaskIds   },
+        },
+      }
+    })
+    scheduleSync(get)
+  },
 
-      // ── Profile board actions ───────────────────────────────────────────
+  reorderTasksInColumn: (columnId, newTaskIds) => {
+    set((s) => ({
+      columns: { ...s.columns, [columnId]: { ...s.columns[columnId], taskIds: newTaskIds } },
+    }))
+    scheduleSync(get)
+  },
 
-      switchToProfile: (newProfileId, oldProfileId) =>
-        set((state) => {
-          const savedBoards = {
-            ...state.savedBoards,
-            [oldProfileId]: {
-              columns: state.columns,
-              tasks: state.tasks,
-              columnOrder: state.columnOrder,
-            },
-          }
-          const newBoard = savedBoards[newProfileId] ?? { columns: {}, tasks: {}, columnOrder: [] }
-          return {
-            savedBoards,
-            columns: newBoard.columns,
-            tasks: newBoard.tasks,
-            columnOrder: newBoard.columnOrder,
-          }
-        }),
+  // ── Profile switching ─────────────────────────────────────────────────
 
-      deleteProfileBoard: (profileId) =>
-        set((state) => {
-          const { [profileId]: _, ...rest } = state.savedBoards
-          return { savedBoards: rest }
-        }),
-    }),
-    {
-      name: 'kanban-boards-v1',
-    }
-  )
-)
+  switchToProfile: async (newProfileId) => {
+    const oldProfileId = activeProfileId()
+    if (oldProfileId === newProfileId) return
+
+    // Flush any pending sync for the current board first
+    await flushBoardSync(oldProfileId, get())
+
+    // Update active profile
+    useProfileStore.getState().setActiveProfileId(newProfileId)
+    syncSettings({ activeProfileId: newProfileId })
+
+    // Load the new board
+    const newBoard = await api.get<BoardState>(`/boards/${newProfileId}`)
+    set({ columns: newBoard.columns, tasks: newBoard.tasks, columnOrder: newBoard.columnOrder })
+  },
+}))

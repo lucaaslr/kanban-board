@@ -3,13 +3,23 @@ import { Moon, Sun, LayoutDashboard } from 'lucide-react'
 import { Board } from './features/board/Board'
 import { TaskPanel } from './features/board/TaskPanel'
 import { ProfileSwitcher } from './features/profiles/ProfileSwitcher'
+import { AuthGate } from './components/AuthGate'
 import { useTheme } from './hooks/useTheme'
+import { useInitData } from './hooks/useInitData'
 import { useUIStore } from './store/uiStore'
+import { useProfileStore } from './store/profileStore'
 import { cn } from './utils/cn'
 
 export function App() {
   const { darkMode, toggleDarkMode } = useTheme()
   const selectedTaskId = useUIStore((s) => s.selectedTaskId)
+  const hydrated = useProfileStore((s) => s.hydrated)
+
+  const { status, handleAuth } = useInitData()
+
+  if (status === 'unauthorized') {
+    return <AuthGate onAuth={handleAuth} />
+  }
 
   return (
     <div className="flex flex-col h-full bg-surface-50 dark:bg-surface-950 transition-colors duration-300">
@@ -34,12 +44,11 @@ export function App() {
           >
             <LayoutDashboard size={14} className="text-white" />
           </div>
-          <ProfileSwitcher />
+          {hydrated && <ProfileSwitcher />}
         </div>
 
         {/* Controls */}
         <div className="flex items-center gap-2">
-          {/* Dark mode toggle */}
           <button
             type="button"
             onClick={toggleDarkMode}
@@ -53,26 +62,26 @@ export function App() {
               'transition-all duration-150'
             )}
           >
-            {darkMode ? (
-              <>
-                <Sun size={13} />
-                <span className="hidden sm:inline">Light</span>
-              </>
-            ) : (
-              <>
-                <Moon size={13} />
-                <span className="hidden sm:inline">Dark</span>
-              </>
-            )}
+            {darkMode ? <><Sun size={13} /><span className="hidden sm:inline">Light</span></> : <><Moon size={13} /><span className="hidden sm:inline">Dark</span></>}
           </button>
         </div>
       </header>
 
       {/* ── Board ───────────────────────────────────────────────────────── */}
       <main className="flex-1 overflow-hidden relative">
-        <Board />
-        {selectedTaskId && (
+        {status === 'loading' && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <p className="text-xs text-gray-400 dark:text-gray-600 font-mono animate-pulse">Loading…</p>
+          </div>
+        )}
+        {status === 'ready' && <Board />}
+        {status === 'ready' && selectedTaskId && (
           <TaskPanel key={selectedTaskId} taskId={selectedTaskId} />
+        )}
+        {status === 'error' && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <p className="text-xs text-red-400">Could not connect to server. Is it running?</p>
+          </div>
         )}
       </main>
     </div>

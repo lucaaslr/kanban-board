@@ -1,0 +1,16 @@
+services:
+  kanban:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - kanban-data:/app/data
+    environment:
+      PORT: 3000
+      DB_PATH: /app/data/db.json
+      # Set a strong secret here — all devices need this same token
+      API_TOKEN: ${API_TOKEN:-}
+    restart: unless-stopped
+
+volumes:
+  kanban-data:

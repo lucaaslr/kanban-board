@@ -1,65 +1,66 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
-import { generateId } from '../utils/id'
+import { api } from '../api/client'
+import { syncSettings } from '../api/sync'
 import type { Profile } from '../types'
 
 interface ProfileState {
   profiles: Record<string, Profile>
   profileOrder: string[]
   activeProfileId: string
+  hydrated: boolean
 }
 
 interface ProfileActions {
-  addProfile: (name: string, emoji: string) => string
+  // Called once on startup by useInitData
+  setAll: (data: Pick<ProfileState, 'profiles' | 'profileOrder' | 'activeProfileId'>) => void
+  setActiveProfileId: (id: string) => void
+
+  addProfile: (name: string, emoji: string, id: string) => void
   updateProfile: (id: string, changes: Partial<Pick<Profile, 'name' | 'emoji'>>) => void
   deleteProfile: (id: string) => void
-  setActiveProfileId: (id: string) => void
 }
 
-export const useProfileStore = create<ProfileState & ProfileActions>()(
-  persist(
-    (set, get) => {
-      const defaultId = generateId()
-      return {
-        profiles: {
-          [defaultId]: { id: defaultId, name: 'Personal', emoji: '👤', createdAt: Date.now() },
-        },
-        profileOrder: [defaultId],
-        activeProfileId: defaultId,
+export const useProfileStore = create<ProfileState & ProfileActions>()((set, get) => ({
+  profiles: {},
+  profileOrder: [],
+  activeProfileId: '',
+  hydrated: false,
 
-        addProfile: (name, emoji) => {
-          const id = generateId()
-          set((state) => ({
-            profiles: {
-              ...state.profiles,
-              [id]: { id, name, emoji, createdAt: Date.now() },
-            },
-            profileOrder: [...state.profileOrder, id],
-          }))
-          return id
-        },
+  setAll: (data) => set({ ...data, hydrated: true }),
 
-        updateProfile: (id, changes) =>
-          set((state) => ({
-            profiles: {
-              ...state.profiles,
-              [id]: { ...state.profiles[id], ...changes },
-            },
-          })),
+  setActiveProfileId: (id) => {
+    set({ activeProfileId: id })
+    syncSettings({ activeProfileId: id })
+  },
 
-        deleteProfile: (id) => {
-          if (get().profileOrder.length <= 1) return
-          set((state) => ({
-            profiles: Object.fromEntries(
-              Object.entries(state.profiles).filter(([pid]) => pid !== id)
-            ) as Record<string, Profile>,
-            profileOrder: state.profileOrder.filter((pid) => pid !== id),
-          }))
-        },
+  addProfile: (name, emoji, id) => {
+    const profile: Profile = { id, name, emoji, createdAt: Date.now() }
+    set((s) => ({
+      profiles: { ...s.profiles, [id]: profile },
+      profileOrder: [...s.profileOrder, id],
+    }))
+    api.post('/profiles', profile).catch(console.error)
+    syncSettings({ profileOrder: [...get().profileOrder] })
+  },
 
-        setActiveProfileId: (id) => set({ activeProfileId: id }),
-      }
-    },
-    { name: 'kanban-profiles-v1' }
-  )
-)
+  updateProfile: (id, changes) => {
+    set((s) => ({
+      profiles: { ...s.profiles, [id]: { ...s.profiles[id], ...changes } },
+    }))
+    const p = get().profiles[id]
+    api.put(`/profiles/${id}`, { name: p.name, emoji: p.emoji }).catch(console.error)
+  },
+
+  deleteProfile: (id) => {
+    const { profileOrder } = get()
+    if (profileOrder.length <= 1) return
+    set((s) => ({
+      profiles: Object.fromEntries(
+        Object.entries(s.profiles).filter(([pid]) => pid !== id)
+      ) as Record<string, Profile>,
+      profileOrder: s.profileOrder.filter((pid) => pid !== id),
+    }))
+    api.del(`/profiles/${id}`).catch(console.error)
+    syncSettings({ profileOrder: get().profileOrder })
+  },
+}))
