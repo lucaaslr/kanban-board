@@ -1,3 +1,10 @@
+export type Profile = {
+  id: string
+  name: string
+  emoji: string
+  createdAt: number
+}
+
 export type Task = {
   id: string
   title: string

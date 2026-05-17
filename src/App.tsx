@@ -1,6 +1,7 @@
 import React from 'react'
 import { Moon, Sun, LayoutDashboard } from 'lucide-react'
 import { Board } from './features/board/Board'
+import { ProfileSwitcher } from './features/profiles/ProfileSwitcher'
 import { useTheme } from './hooks/useTheme'
 import { cn } from './utils/cn'
 
@@ -30,14 +31,7 @@ export function App() {
           >
             <LayoutDashboard size={14} className="text-white" />
           </div>
-          <div>
-            <h1 className="text-sm font-semibold text-gray-800 dark:text-gray-100 leading-none">
-              Kanban
-            </h1>
-            <p className="text-[10px] text-gray-400 dark:text-gray-500 leading-none mt-0.5 font-mono">
-              personal board
-            </p>
-          </div>
+          <ProfileSwitcher />
         </div>
 
         {/* Controls */}

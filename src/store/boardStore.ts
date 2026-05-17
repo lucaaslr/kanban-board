@@ -27,11 +27,31 @@ interface BoardActions {
     toIndex: number
   ) => void
   reorderTasksInColumn: (columnId: string, newTaskIds: string[]) => void
+
+  // Profile board actions
+  switchToProfile: (newProfileId: string, oldProfileId: string) => void
+  deleteProfileBoard: (profileId: string) => void
 }
 
 // ─── Store Type ────────────────────────────────────────────────────────────
 
-type Store = BoardState & BoardActions
+type Store = BoardState & BoardActions & {
+  savedBoards: Record<string, BoardState>
+}
+
+// ─── Migration helper ──────────────────────────────────────────────────────
+
+function getInitialBoardState(): BoardState {
+  try {
+    const raw = localStorage.getItem('kanban-board-v1')
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      const s = parsed?.state
+      if (s?.columns && s?.tasks && s?.columnOrder) return s
+    }
+  } catch { /* ignore */ }
+  return createSeedState()
+}
 
 // ─── Store Implementation ──────────────────────────────────────────────────
 
@@ -39,7 +59,8 @@ export const useBoardStore = create<Store>()(
   persist(
     (set) => ({
       // Initial state (overridden by persisted state if available)
-      ...createSeedState(),
+      ...getInitialBoardState(),
+      savedBoards: {},
 
       // ── Column Actions ──────────────────────────────────────────────────
 
@@ -186,9 +207,36 @@ export const useBoardStore = create<Store>()(
             [columnId]: { ...state.columns[columnId], taskIds: newTaskIds },
           },
         })),
+
+      // ── Profile board actions ───────────────────────────────────────────
+
+      switchToProfile: (newProfileId, oldProfileId) =>
+        set((state) => {
+          const savedBoards = {
+            ...state.savedBoards,
+            [oldProfileId]: {
+              columns: state.columns,
+              tasks: state.tasks,
+              columnOrder: state.columnOrder,
+            },
+          }
+          const newBoard = savedBoards[newProfileId] ?? { columns: {}, tasks: {}, columnOrder: [] }
+          return {
+            savedBoards,
+            columns: newBoard.columns,
+            tasks: newBoard.tasks,
+            columnOrder: newBoard.columnOrder,
+          }
+        }),
+
+      deleteProfileBoard: (profileId) =>
+        set((state) => {
+          const { [profileId]: _, ...rest } = state.savedBoards
+          return { savedBoards: rest }
+        }),
     }),
     {
-      name: 'kanban-board-v1',
+      name: 'kanban-boards-v1',
     }
   )
 )
