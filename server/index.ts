@@ -41,7 +41,7 @@ app.get('/api/auth-config', (_req, res) => {
 if (isProd) {
   const dist = path.join(__dirname, '..', 'dist')
   app.use(express.static(dist))
-  app.get('*', (_req, res) => res.sendFile(path.join(dist, 'index.html')))
+  app.get(/.*/, (_req, res) => res.sendFile(path.join(dist, 'index.html')))
 }
 
 app.listen(PORT, '0.0.0.0', () => {
